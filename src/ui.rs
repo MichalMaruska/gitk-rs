@@ -472,7 +472,7 @@ impl GitkApp {
             .id_source("graph_scroll")
             .auto_shrink([false; 2])
             .show_rows(ui, ROW_H, n, |ui, vis| {
-                let painter = ui.painter();
+                let painter = ui.painter().clone();
                 let origin  = ui.cursor().min;
 
                 // ── Draw edges (rows above/below for smooth continuation) ──
