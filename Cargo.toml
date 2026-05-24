@@ -1,0 +1,21 @@
+[package]
+name = "gitk-rs"
+version = "0.1.0"
+edition = "2021"
+description = "A Rust/egui port of gitk — the Git repository browser"
+authors = ["gitk-rs"]
+
+[[bin]]
+name = "gitk-rs"
+path = "src/main.rs"
+
+[dependencies]
+eframe = { version = "0.27", default-features = false, features = ["default_fonts", "glow"] }
+egui = "0.27"
+git2 = { version = "0.18", default-features = false }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true
