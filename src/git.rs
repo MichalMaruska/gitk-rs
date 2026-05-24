@@ -212,6 +212,7 @@ impl GitRepo {
             true
         }).ok();
 
+        // Pass 1: collect file metadata (status, paths).
         let mut files: Vec<DiffFile> = Vec::new();
         diff.foreach(
             &mut |delta, _| {
@@ -235,21 +236,39 @@ impl GitRepo {
             },
             None,
             None,
-            Some(&mut |delta, _hunk, line| {
-                let np = delta.new_file().path()
-                    .or_else(|| delta.old_file().path())
-                    .map(|p| p.display().to_string())
-                    .unwrap_or_default();
-                if let Some(f) = files.iter_mut().find(|f| f.path == np) {
-                    match line.origin() {
-                        '+' => f.additions += 1,
-                        '-' => f.deletions += 1,
-                        _   => {}
-                    }
-                }
-                true
-            }),
+            None,
         ).ok();
+
+        // Pass 2: count additions/deletions per file using a line callback.
+        // We use a separate Vec<(usize,usize)> indexed by file position so there
+        // is no simultaneous mutable borrow of `files` across two closures.
+        let mut counts: Vec<(usize, usize)> = vec![(0, 0); files.len()];
+        {
+            let file_paths: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
+            diff.foreach(
+                &mut |_, _| true,
+                None,
+                None,
+                Some(&mut |delta, _hunk, line| {
+                    let np = delta.new_file().path()
+                        .or_else(|| delta.old_file().path())
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_default();
+                    if let Some(idx) = file_paths.iter().position(|p| *p == np) {
+                        match line.origin() {
+                            '+' => counts[idx].0 += 1,
+                            '-' => counts[idx].1 += 1,
+                            _   => {}
+                        }
+                    }
+                    true
+                }),
+            ).ok();
+        }
+        for (i, f) in files.iter_mut().enumerate() {
+            f.additions = counts[i].0;
+            f.deletions = counts[i].1;
+        }
 
         CommitDiff { files, patch: patch_buf }
     }
