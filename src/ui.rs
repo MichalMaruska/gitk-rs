@@ -489,12 +489,12 @@ impl GitkApp {
                         let x2  = origin.x + 4.0 + edge.to_lane   as f32 * LANE_W + LANE_W / 2.0;
                         if (x1 - x2).abs() < 0.5 {
                             painter.line_segment([egui::pos2(x1, yc), egui::pos2(x2, yn)],
-                                Stroke::new(1.8, col));
+                                Stroke::new(1.8_f32, col));
                         } else {
                             let mid = (yc + yn) / 2.0;
-                            painter.line_segment([egui::pos2(x1, yc), egui::pos2(x1, mid)], Stroke::new(1.8, col));
-                            painter.line_segment([egui::pos2(x1, mid), egui::pos2(x2, mid)], Stroke::new(1.8, col));
-                            painter.line_segment([egui::pos2(x2, mid), egui::pos2(x2, yn)], Stroke::new(1.8, col));
+                            painter.line_segment([egui::pos2(x1, yc), egui::pos2(x1, mid)], Stroke::new(1.8_f32, col));
+                            painter.line_segment([egui::pos2(x1, mid), egui::pos2(x2, mid)], Stroke::new(1.8_f32, col));
+                            painter.line_segment([egui::pos2(x2, mid), egui::pos2(x2, yn)], Stroke::new(1.8_f32, col));
                         }
                     }
                 }
@@ -531,7 +531,7 @@ impl GitkApp {
                     let dy = origin.y + (row as f32 + 0.5) * ROW_H;
                     painter.circle_filled(egui::pos2(dx, dy), DOT_R, dot_col);
                     painter.circle_stroke(egui::pos2(dx, dy), DOT_R,
-                        Stroke::new(1.0, Color32::from_rgb(0xff, 0xff, 0xff)));
+                        Stroke::new(1.0_f32, Color32::from_rgb(0xff, 0xff, 0xff)));
 
                     // Text area
                     let tx  = origin.x + graph_w;
@@ -555,7 +555,7 @@ impl GitkApp {
                         let bw = g.size().x + 6.0;
                         let br = egui::Rect::from_min_size(egui::pos2(bx + 1.0, ty - 1.0), egui::vec2(bw, ROW_H - 4.0));
                         painter.rect_filled(br, 2.5, bg_col);
-                        painter.rect_stroke(br, 2.5, Stroke::new(0.5, fg_col.linear_multiply(0.5)));
+                        painter.rect_stroke(br, 2.5, Stroke::new(0.5_f32, fg_col.linear_multiply(0.5)));
                         painter.galley(egui::pos2(bx + 4.0, ty + 1.0), g, fg_col);
                         bx += bw + 3.0;
                     }
@@ -627,7 +627,7 @@ impl GitkApp {
         let short = commit.short_id.clone();
 
         let mut close = false;
-        egui::Area::new("ctx_menu")
+        egui::Area::new("ctx_menu".into())
             .fixed_pos(self.ctx_menu_pos)
             .order(egui::Order::Tooltip)
             .show(ctx, |ui| {
