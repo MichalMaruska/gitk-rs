@@ -442,12 +442,29 @@ impl GitkApp {
             ui.centered_and_justified(|ui| { ui.label("No commits"); });
             return;
         }
-        let graph = match &self.graph { Some(g) => g, None => return };
-        let n = self.commits.len();
 
-        let graph_w   = (graph.max_lanes as f32 * LANE_W + 8.0).max(60.0);
-        let date_w    = if self.show_dates { 138.0 } else { 0.0 };
-        let author_w  = 170.0;
+        // Extract all data from self into locals BEFORE any closure,
+        // so no borrow of self survives into the show_rows closure.
+        let (graph_nodes, max_lanes) = match &self.graph {
+            Some(g) => (g.nodes.clone(), g.max_lanes),
+            None => return,
+        };
+        let n              = self.commits.len();
+        let show_dates     = self.show_dates;
+        let selected_idx   = self.selected_idx;
+        let search_matches = self.search_matches.clone();
+        // Per-row display data — avoids borrowing self.commits inside the closure.
+        let commit_rows: Vec<(String, String, String, Vec<crate::git::RefLabel>)> =
+            self.commits.iter().map(|c| (
+                c.summary.clone(),
+                c.author.clone(),
+                c.date_str.clone(),
+                c.refs.clone(),
+            )).collect();
+
+        let graph_w  = (max_lanes as f32 * LANE_W + 8.0).max(60.0);
+        let date_w   = if show_dates { 138.0 } else { 0.0 };
+        let author_w = 170.0;
 
         // Column headers
         let hdr_bg = Color32::from_rgb(0x22, 0x22, 0x28);
@@ -456,7 +473,7 @@ impl GitkApp {
                 ui.add_space(graph_w);
                 ui.label(RichText::new("Summary").color(Color32::from_rgb(0x70, 0x70, 0x90)).size(10.5));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if self.show_dates {
+                    if show_dates {
                         ui.label(RichText::new("Date").color(Color32::from_rgb(0x70, 0x70, 0x90)).size(10.5));
                         ui.add_space(date_w - 30.0);
                     }
@@ -468,6 +485,10 @@ impl GitkApp {
 
         let avail_w = ui.available_width();
 
+        // Collect interactions from inside the closure, apply to self after.
+        let mut clicked_row: Option<usize> = None;
+        let mut right_clicked: Option<(usize, egui::Pos2)> = None;
+
         egui::ScrollArea::vertical()
             .id_source("graph_scroll")
             .auto_shrink([false; 2])
@@ -475,13 +496,13 @@ impl GitkApp {
                 let painter = ui.painter().clone();
                 let origin  = ui.cursor().min;
 
-                // ── Draw edges (rows above/below for smooth continuation) ──
+                // ── Draw edges ────────────────────────────────────────────
                 let r0 = vis.start.saturating_sub(1);
                 let r1 = (vis.end + 1).min(n);
                 for row in r0..r1 {
-                    let node    = &graph.nodes[row];
-                    let yc      = origin.y + (row as f32 + 0.5) * ROW_H;
-                    let yn      = origin.y + (row as f32 + 1.5) * ROW_H;
+                    let node = &graph_nodes[row];
+                    let yc   = origin.y + (row as f32 + 0.5) * ROW_H;
+                    let yn   = origin.y + (row as f32 + 1.5) * ROW_H;
 
                     for edge in &node.edges {
                         let col = branch_color(edge.color_idx);
@@ -501,10 +522,10 @@ impl GitkApp {
 
                 // ── Draw rows ─────────────────────────────────────────────
                 for row in vis {
-                    let node   = &graph.nodes[row];
-                    let commit = &self.commits[node.commit_idx];
-                    let is_sel = self.selected_idx == Some(row);
-                    let is_hit = self.search_matches.contains(&row);
+                    let node   = &graph_nodes[row];
+                    let (summary, author, date_str, refs) = &commit_rows[node.commit_idx];
+                    let is_sel = selected_idx == Some(row);
+                    let is_hit = search_matches.contains(&row);
 
                     let row_rect = egui::Rect::from_min_size(
                         egui::pos2(origin.x, origin.y + row as f32 * ROW_H),
@@ -540,7 +561,7 @@ impl GitkApp {
 
                     // Ref badges
                     let mut bx = tx;
-                    for rl in &commit.refs {
+                    for rl in refs {
                         let (bg_col, fg_col) = match rl.kind {
                             RefKind::Head   => (Color32::from_rgb(0x10, 0x60, 0x10), Color32::from_rgb(0x90, 0xff, 0x90)),
                             RefKind::Tag    => (Color32::from_rgb(0x60, 0x40, 0x00), Color32::from_rgb(0xff, 0xd0, 0x50)),
@@ -568,7 +589,7 @@ impl GitkApp {
                         painter.text(
                             egui::pos2(sum_x, ty),
                             egui::Align2::LEFT_TOP,
-                            &commit.summary,
+                            summary.as_str(),
                             FontId::proportional(13.0),
                             sum_col,
                         );
@@ -578,32 +599,30 @@ impl GitkApp {
                     painter.text(
                         egui::pos2(rx - date_w - author_w, ty + 1.0),
                         egui::Align2::LEFT_TOP,
-                        &commit.author,
+                        author.as_str(),
                         FontId::proportional(11.0),
                         Color32::from_rgb(0x80, 0xc0, 0x80),
                     );
 
                     // Date
-                    if self.show_dates {
+                    if show_dates {
                         painter.text(
                             egui::pos2(rx - date_w + 4.0, ty + 1.0),
                             egui::Align2::LEFT_TOP,
-                            &commit.date_str,
+                            date_str.as_str(),
                             FontId::proportional(11.0),
                             Color32::from_rgb(0x80, 0xa0, 0xc8),
                         );
                     }
 
-                    // Click / right-click
+                    // Click / right-click — record intent, apply to self after closure
                     let resp = ui.allocate_rect(row_rect, egui::Sense::click());
-                    if resp.clicked() && self.selected_idx != Some(row) {
-                        self.select_commit(row);
+                    if resp.clicked() && selected_idx != Some(row) {
+                        clicked_row = Some(row);
                     }
                     if resp.secondary_clicked() {
-                        self.ctx_menu_open = true;
-                        self.ctx_menu_idx  = Some(row);
-                        self.ctx_menu_pos  = ctx.input(|i| i.pointer.latest_pos()).unwrap_or_default();
-                        if self.selected_idx != Some(row) { self.select_commit(row); }
+                        let pos = ctx.input(|i| i.pointer.latest_pos()).unwrap_or_default();
+                        right_clicked = Some((row, pos));
                     }
                     if resp.hovered() && !is_sel {
                         painter.rect_filled(row_rect, 0.0,
@@ -611,6 +630,19 @@ impl GitkApp {
                     }
                 }
             });
+
+        // Apply interactions now that the closure (and its borrows) are done
+        if let Some(row) = clicked_row {
+            self.select_commit(row);
+        }
+        if let Some((row, pos)) = right_clicked {
+            self.ctx_menu_open = true;
+            self.ctx_menu_idx  = Some(row);
+            self.ctx_menu_pos  = pos;
+            if self.selected_idx != Some(row) {
+                self.select_commit(row);
+            }
+        }
     }
 }
 
