@@ -654,55 +654,65 @@ impl GitkApp {
     fn draw_context_menu(&mut self, ctx: &egui::Context) {
         if !self.ctx_menu_open { return; }
         let idx = match self.ctx_menu_idx { Some(i) => i, None => return };
-        let commit = &self.commits[idx];
-        let sha   = commit.id.clone();
-        let short = commit.short_id.clone();
 
-        let mut close = false;
+        // Clone all data out of self before any closure captures it.
+        let sha      = self.commits[idx].id.clone();
+        let short    = self.commits[idx].short_id.clone();
+        let author   = self.commits[idx].author.clone();
+        let summary  = self.commits[idx].summary.clone();
+        let body     = self.commits[idx].body.clone();
+        let menu_pos = self.ctx_menu_pos;
+
+        // Deferred mutations — populated inside the closure, applied after.
+        let mut close               = false;
+        let mut copy_text: Option<String> = None;
+        let mut flash               = false;
+        let mut find_author         = false;
+
         egui::Area::new("ctx_menu".into())
-            .fixed_pos(self.ctx_menu_pos)
+            .fixed_pos(menu_pos)
             .order(egui::Order::Tooltip)
             .show(ctx, |ui| {
                 egui::Frame::popup(&ctx.style()).show(ui, |ui| {
                     ui.set_min_width(200.0);
-
                     ui.label(RichText::new(format!("Commit {short}"))
                         .color(Color32::from_rgb(0x80, 0xb8, 0xff)).size(11.0));
                     ui.separator();
-
                     if ui.button("📋 Copy full SHA").clicked() {
-                        ctx.output_mut(|o| o.copied_text = sha.clone());
-                        self.copied_flash = 2.5;
-                        close = true;
+                        copy_text = Some(sha.clone()); flash = true; close = true;
                     }
                     if ui.button("📋 Copy short SHA").clicked() {
-                        ctx.output_mut(|o| o.copied_text = short.clone());
-                        self.copied_flash = 2.5;
-                        close = true;
+                        copy_text = Some(short.clone()); flash = true; close = true;
                     }
                     if ui.button("📋 Copy commit message").clicked() {
-                        let msg = if commit.body.is_empty() {
-                            commit.summary.clone()
+                        let msg = if body.is_empty() {
+                            summary.clone()
                         } else {
-                            format!("{}\n\n{}", commit.summary, commit.body)
+                            format!("{}
+
+{}", summary, body)
                         };
-                        ctx.output_mut(|o| o.copied_text = msg);
-                        self.copied_flash = 2.5;
-                        close = true;
+                        copy_text = Some(msg); flash = true; close = true;
                     }
                     ui.separator();
                     if ui.button("👤 Find commits by this author").clicked() {
-                        self.search_query   = commit.author.clone();
-                        self.search_field   = "author".into();
-                        self.run_search();
-                        close = true;
+                        find_author = true; close = true;
                     }
                     ui.separator();
                     if ui.button("✖ Close").clicked() { close = true; }
                 });
             });
 
-        // Close if clicked outside
+        // Apply mutations after the closure (all borrows dropped).
+        if let Some(text) = copy_text {
+            ctx.output_mut(|o| o.copied_text = text);
+        }
+        if flash { self.copied_flash = 2.5; }
+        if find_author {
+            self.search_query = author;
+            self.search_field = "author".into();
+            self.run_search();
+        }
         if ctx.input(|i| i.pointer.any_click()) && !ctx.is_pointer_over_area() {
             close = true;
         }
@@ -725,29 +735,46 @@ impl GitkApp {
                 return;
             }
         };
-        let commit = &self.commits[idx];
 
-        // Commit header (fixed, non-scrolling)
+        // Clone everything from self up front — no &self.x borrow survives into closures.
+        let c_id       = self.commits[idx].id.clone();
+        let c_author   = self.commits[idx].author.clone();
+        let c_email    = self.commits[idx].email.clone();
+        let c_date     = self.commits[idx].date_str.clone();
+        let c_summary  = self.commits[idx].summary.clone();
+        let c_body     = self.commits[idx].body.clone();
+        let c_parents  = self.commits[idx].parents.clone();
+        let c_refs     = self.commits[idx].refs.clone();
+        let c_msg      = if c_body.is_empty() {
+            c_summary.clone()
+        } else {
+            format!("{}
+
+{}", c_summary, c_body)
+        };
+
+        let mut copy_sha  = false;
+        let mut set_diff  = false;
+        let mut set_blame = false;
+
+        // Commit header panel
         egui::TopBottomPanel::top("detail_header")
             .frame(egui::Frame::none().fill(Color32::from_rgb(0x20, 0x20, 0x28)))
             .show_inside(ui, |ui| {
                 ui.add_space(4.0);
-                // SHA + copy button
                 ui.horizontal(|ui| {
                     ui.label(
-                        RichText::new(&commit.id)
+                        RichText::new(&c_id)
                             .font(FontId::monospace(11.0))
                             .color(Color32::from_rgb(0x60, 0xa8, 0xe8)),
                     );
                     if ui.small_button("📋").on_hover_text("Copy SHA").clicked() {
-                        ui.output_mut(|o| o.copied_text = commit.id.clone());
-                        self.copied_flash = 2.5;
+                        copy_sha = true;
                     }
                 });
-                // Ref badges
-                if !commit.refs.is_empty() {
+                if !c_refs.is_empty() {
                     ui.horizontal_wrapped(|ui| {
-                        for rl in &commit.refs {
+                        for rl in &c_refs {
                             let col = match rl.kind {
                                 RefKind::Head   => Color32::from_rgb(0x90, 0xff, 0x90),
                                 RefKind::Tag    => Color32::from_rgb(0xff, 0xd0, 0x50),
@@ -760,55 +787,58 @@ impl GitkApp {
                 }
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Author:").color(Color32::from_rgb(0x70, 0x70, 0x70)).size(11.0));
-                    ui.label(RichText::new(format!("{} <{}>", commit.author, commit.email))
+                    ui.label(RichText::new(format!("{} <{}>", c_author, c_email))
                         .color(Color32::from_rgb(0x80, 0xc0, 0x80)).size(11.0));
                 });
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Date:  ").color(Color32::from_rgb(0x70, 0x70, 0x70)).size(11.0));
-                    ui.label(RichText::new(&commit.date_str)
-                        .color(Color32::from_rgb(0x80, 0xa0, 0xc8)).size(11.0));
+                    ui.label(RichText::new(&c_date).color(Color32::from_rgb(0x80, 0xa0, 0xc8)).size(11.0));
                 });
-                if !commit.parents.is_empty() {
+                if !c_parents.is_empty() {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("Parents:").color(Color32::from_rgb(0x70,0x70,0x70)).size(11.0));
-                        for p in &commit.parents {
-                            ui.label(RichText::new(&p[..8]).font(FontId::monospace(10.5))
+                        for p in &c_parents {
+                            ui.label(RichText::new(&p[..8.min(p.len())])
+                                .font(FontId::monospace(10.5))
                                 .color(Color32::from_rgb(0x60, 0xa8, 0xe8)));
                         }
                     });
                 }
                 ui.add_space(4.0);
-                let msg = if commit.body.is_empty() {
-                    commit.summary.clone()
-                } else {
-                    format!("{}\n\n{}", commit.summary, commit.body)
-                };
-                ui.label(RichText::new(&msg).color(Color32::from_rgb(0xe0, 0xe0, 0xe0)).size(13.0));
+                ui.label(RichText::new(&c_msg).color(Color32::from_rgb(0xe0, 0xe0, 0xe0)).size(13.0));
                 ui.add_space(4.0);
             });
 
         // Tab bar
+        let current_tab = self.bottom_tab;
         egui::TopBottomPanel::top("detail_tabs")
             .frame(egui::Frame::none().fill(Color32::from_rgb(0x1a, 0x1a, 0x22)))
             .show_inside(ui, |ui| {
                 ui.horizontal(|ui| {
-                    let diff_sel  = self.bottom_tab == BottomTab::Diff;
-                    let blame_sel = self.bottom_tab == BottomTab::Blame;
-                    if ui.selectable_label(diff_sel,  "Diff").clicked()  { self.bottom_tab = BottomTab::Diff; }
-                    if ui.selectable_label(blame_sel, "Blame").clicked() {
-                        self.bottom_tab = BottomTab::Blame;
-                        self.load_blame_for_selected_file();
-                    }
+                    if ui.selectable_label(current_tab == BottomTab::Diff,  "Diff").clicked()  { set_diff  = true; }
+                    if ui.selectable_label(current_tab == BottomTab::Blame, "Blame").clicked() { set_blame = true; }
                 });
             });
 
+        // Apply tab mutations before drawing content
+        if copy_sha {
+            ui.output_mut(|o| o.copied_text = c_id.clone());
+            self.copied_flash = 2.5;
+        }
+        if set_diff  { self.bottom_tab = BottomTab::Diff; }
+        if set_blame {
+            self.bottom_tab = BottomTab::Blame;
+            self.load_blame_for_selected_file();
+        }
+
         // Scrollable content
+        let tab = self.bottom_tab;
         egui::CentralPanel::default().show_inside(ui, |ui| {
             egui::ScrollArea::both()
                 .id_source("detail_scroll")
                 .auto_shrink([false; 2])
                 .show(ui, |ui| {
-                    match self.bottom_tab {
+                    match tab {
                         BottomTab::Diff  => self.draw_diff(ui),
                         BottomTab::Blame => self.draw_blame(ui),
                     }
