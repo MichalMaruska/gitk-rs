@@ -546,18 +546,18 @@ impl GitkApp {
                         painter.rect_filled(row_rect, 0.0, bg);
                     }
 
-                    // Dot
+                    // Dot — use row_rect so position is correct inside scroll area
                     let dot_col = branch_color(node.color_idx);
-                    let dx = origin.x + 4.0 + node.lane as f32 * LANE_W + LANE_W / 2.0;
-                    let dy = origin.y + (row as f32 + 0.5) * ROW_H;
+                    let dx = row_rect.left() + 4.0 + node.lane as f32 * LANE_W + LANE_W / 2.0;
+                    let dy = row_rect.center().y;
                     painter.circle_filled(egui::pos2(dx, dy), DOT_R, dot_col);
                     painter.circle_stroke(egui::pos2(dx, dy), DOT_R,
                         Stroke::new(1.0_f32, Color32::from_rgb(0xff, 0xff, 0xff)));
 
-                    // Text area
-                    let tx  = origin.x + graph_w;
-                    let ty  = origin.y + row as f32 * ROW_H + 3.0;
-                    let rx  = origin.x + avail_w;
+                    // Text area — use row_rect for correct coordinates inside scroll area
+                    let tx  = row_rect.left() + graph_w;
+                    let ty  = row_rect.top() + 3.0;
+                    let rx  = row_rect.right();
 
                     // Ref badges
                     let mut bx = tx;
@@ -581,19 +581,15 @@ impl GitkApp {
                         bx += bw + 3.0;
                     }
 
-                    // Summary
-                    let sum_x     = bx + 4.0;
-                    let sum_max_w = rx - author_w - date_w - sum_x - 4.0;
-                    if sum_max_w > 20.0 {
-                        let sum_col = if is_sel { Color32::WHITE } else { Color32::from_rgb(0xd4, 0xd4, 0xd4) };
-                        painter.text(
-                            egui::pos2(sum_x, ty),
-                            egui::Align2::LEFT_TOP,
-                            summary.as_str(),
-                            FontId::proportional(13.0),
-                            sum_col,
-                        );
-                    }
+                    // Summary — painter clips naturally at panel edge
+                    let sum_col = if is_sel { Color32::WHITE } else { Color32::from_rgb(0xd4, 0xd4, 0xd4) };
+                    painter.text(
+                        egui::pos2(bx + 4.0, ty),
+                        egui::Align2::LEFT_TOP,
+                        summary.as_str(),
+                        FontId::proportional(13.0),
+                        sum_col,
+                    );
 
                     // Author
                     painter.text(
