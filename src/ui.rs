@@ -462,9 +462,13 @@ impl GitkApp {
                 c.refs.clone(),
             )).collect();
 
-        let graph_w  = (max_lanes as f32 * LANE_W + 8.0).max(60.0);
-        let date_w   = if show_dates { 138.0 } else { 0.0 };
-        let author_w = 170.0;
+        // Cap the graph column: show at most MAX_VIS_LANES lanes.
+        // Repos with many parallel branches shouldn't eat the whole panel.
+        const MAX_VIS_LANES: usize = 8;
+        let vis_lanes = max_lanes.min(MAX_VIS_LANES);
+        let graph_w   = (vis_lanes as f32 * LANE_W + 8.0).max(32.0);
+        let date_w    = if show_dates { 138.0 } else { 0.0 };
+        let author_w  = 170.0;
 
         // Column headers
         let hdr_bg = Color32::from_rgb(0x22, 0x22, 0x28);
@@ -488,6 +492,34 @@ impl GitkApp {
         // Collect interactions from inside the closure, apply to self after.
         let mut clicked_row: Option<usize> = None;
         let mut right_clicked: Option<(usize, egui::Pos2)> = None;
+        // Arrow click: jump to the commit that owns a truncated lane
+        let mut arrow_clicked: Option<usize> = None;
+
+        // Build per-row truncation info outside the closure (pure data, no self borrow).
+        // For each row: which lanes are truncated (>= vis_lanes) and their color + commit_idx.
+        // We only need: does this row have *any* active lane >= vis_lanes?
+        // We'll use the edge list: a carry-through edge (from==to) with lane >= vis_lanes
+        // means that lane is active and cut off. We find the commit_idx for it via graph_nodes.
+        let trunc_info: Vec<Option<(usize, Color32)>> = (0..n).map(|row| {
+            let node = &graph_nodes[row];
+            // Find the first carry-through edge that is beyond vis_lanes
+            for edge in &node.edges {
+                if edge.from_lane == edge.to_lane && edge.from_lane >= vis_lanes {
+                    // Find which commit owns this lane — scan upward for the node on that lane
+                    let color = branch_color(edge.color_idx);
+                    // The commit_idx for the lane owner isn't directly stored per-edge,
+                    // but we can use the color as identity and just jump to first match
+                    // of a node on that lane above this row.
+                    let owner = graph_nodes[..row].iter().rev()
+                        .find(|n| n.lane == edge.from_lane)
+                        .map(|n| n.commit_idx);
+                    if let Some(ci) = owner {
+                        return Some((ci, color));
+                    }
+                }
+            }
+            None
+        }).collect();
 
         egui::ScrollArea::vertical()
             .id_source("graph_scroll")
@@ -505,9 +537,11 @@ impl GitkApp {
                     let yn   = origin.y + (row as f32 + 1.5) * ROW_H;
 
                     for edge in &node.edges {
+                        // Both ends beyond cap → skip entirely
+                        if edge.from_lane >= vis_lanes && edge.to_lane >= vis_lanes { continue; }
                         let col = branch_color(edge.color_idx);
-                        let x1  = origin.x + 4.0 + edge.from_lane as f32 * LANE_W + LANE_W / 2.0;
-                        let x2  = origin.x + 4.0 + edge.to_lane   as f32 * LANE_W + LANE_W / 2.0;
+                        let x1  = origin.x + 4.0 + edge.from_lane.min(vis_lanes - 1) as f32 * LANE_W + LANE_W / 2.0;
+                        let x2  = origin.x + 4.0 + edge.to_lane.min(vis_lanes - 1)   as f32 * LANE_W + LANE_W / 2.0;
                         if (x1 - x2).abs() < 0.5 {
                             painter.line_segment([egui::pos2(x1, yc), egui::pos2(x2, yn)],
                                 Stroke::new(1.8_f32, col));
@@ -546,15 +580,44 @@ impl GitkApp {
                         painter.rect_filled(row_rect, 0.0, bg);
                     }
 
-                    // Dot — use row_rect so position is correct inside scroll area
-                    let dot_col = branch_color(node.color_idx);
-                    let dx = row_rect.left() + 4.0 + node.lane as f32 * LANE_W + LANE_W / 2.0;
+                    // Dot
+                    let dot_col  = branch_color(node.color_idx);
+                    let dot_lane = node.lane.min(vis_lanes - 1);
+                    let dx = row_rect.left() + 4.0 + dot_lane as f32 * LANE_W + LANE_W / 2.0;
                     let dy = row_rect.center().y;
                     painter.circle_filled(egui::pos2(dx, dy), DOT_R, dot_col);
                     painter.circle_stroke(egui::pos2(dx, dy), DOT_R,
-                        Stroke::new(1.0_f32, Color32::from_rgb(0xff, 0xff, 0xff)));
+                        Stroke::new(1.0_f32, Color32::WHITE));
 
-                    // Text area — use row_rect for correct coordinates inside scroll area
+                    // ── Truncation arrow ──────────────────────────────────
+                    // If any lane is cut off at this row, draw a ► at the right
+                    // edge of the graph column in the lane's colour.
+                    let arrow_rect = if let Some((target_ci, arr_col)) = trunc_info[row] {
+                        // Short horizontal stub from cap edge + chevron
+                        let ax = row_rect.left() + graph_w - 10.0;
+                        let ay = row_rect.center().y;
+                        // Stub line
+                        painter.line_segment(
+                            [egui::pos2(row_rect.left() + graph_w - 14.0, ay),
+                             egui::pos2(ax, ay)],
+                            Stroke::new(1.5_f32, arr_col),
+                        );
+                        // Chevron ►  (three lines forming arrow head)
+                        let aw = 5.0_f32;
+                        let ah = 4.0_f32;
+                        painter.line_segment([egui::pos2(ax, ay - ah), egui::pos2(ax + aw, ay)], Stroke::new(1.5_f32, arr_col));
+                        painter.line_segment([egui::pos2(ax, ay + ah), egui::pos2(ax + aw, ay)], Stroke::new(1.5_f32, arr_col));
+                        // Clickable rect over the arrow
+                        let ar = egui::Rect::from_center_size(
+                            egui::pos2(ax + aw / 2.0, ay),
+                            egui::vec2(16.0, ROW_H),
+                        );
+                        Some((ar, target_ci))
+                    } else {
+                        None
+                    };
+
+                    // Text area
                     let tx  = row_rect.left() + graph_w;
                     let ty  = row_rect.top() + 3.0;
                     let rx  = row_rect.right();
@@ -581,7 +644,7 @@ impl GitkApp {
                         bx += bw + 3.0;
                     }
 
-                    // Summary — painter clips naturally at panel edge
+                    // Summary
                     let sum_col = if is_sel { Color32::WHITE } else { Color32::from_rgb(0xd4, 0xd4, 0xd4) };
                     painter.text(
                         egui::pos2(bx + 4.0, ty),
@@ -611,7 +674,7 @@ impl GitkApp {
                         );
                     }
 
-                    // Click / right-click — record intent, apply to self after closure
+                    // Row interaction
                     let resp = ui.allocate_rect(row_rect, egui::Sense::click());
                     if resp.clicked() && selected_idx != Some(row) {
                         clicked_row = Some(row);
@@ -624,11 +687,29 @@ impl GitkApp {
                         painter.rect_filled(row_rect, 0.0,
                             Color32::from_rgba_unmultiplied(255, 255, 255, 8));
                     }
+
+                    // Arrow click — jump to the truncated lane's commit
+                    if let Some((ar, target_ci)) = arrow_rect {
+                        let ar_resp = ui.allocate_rect(ar, egui::Sense::click());
+                        if ar_resp.hovered() {
+                            painter.rect_filled(ar, 3.0_f32,
+                                Color32::from_rgba_unmultiplied(255, 255, 255, 20));
+                        }
+                        if ar_resp.clicked() {
+                            // Find the row index for this commit_idx
+                            if let Some(target_row) = graph_nodes.iter().position(|n| n.commit_idx == target_ci) {
+                                arrow_clicked = Some(target_row);
+                            }
+                        }
+                    }
                 }
             });
 
         // Apply interactions now that the closure (and its borrows) are done
-        if let Some(row) = clicked_row {
+        if let Some(row) = arrow_clicked {
+            // Arrow click takes priority — jump to the truncated lane's commit
+            self.select_commit(row);
+        } else if let Some(row) = clicked_row {
             self.select_commit(row);
         }
         if let Some((row, pos)) = right_clicked {
