@@ -525,16 +525,24 @@ impl GitkApp {
             .id_source("graph_scroll")
             .auto_shrink([false; 2])
             .show_rows(ui, ROW_H, n, |ui, vis| {
+                // Allocate the full height of the visible rows so the scroll
+                // area knows how tall this content is and scrolling works.
+                let n_vis = vis.end - vis.start;
+                let (full_rect, _) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), n_vis as f32 * ROW_H),
+                    egui::Sense::hover(),
+                );
                 let painter = ui.painter().clone();
-                let origin  = ui.cursor().min;
+                // Origin is the top-left of the first visible row.
+                let origin = egui::pos2(full_rect.left(), full_rect.top());
 
                 // ── Draw edges ────────────────────────────────────────────
                 let r0 = vis.start.saturating_sub(1);
                 let r1 = (vis.end + 1).min(n);
                 for row in r0..r1 {
                     let node = &graph_nodes[row];
-                    let yc   = origin.y + (row as f32 + 0.5) * ROW_H;
-                    let yn   = origin.y + (row as f32 + 1.5) * ROW_H;
+                    let yc   = origin.y + (row - vis.start) as f32 * ROW_H + ROW_H * 0.5;
+                    let yn   = origin.y + (row - vis.start) as f32 * ROW_H + ROW_H * 1.5;
 
                     for edge in &node.edges {
                         // Both ends beyond cap → skip entirely
@@ -562,7 +570,7 @@ impl GitkApp {
                     let is_hit = search_matches.contains(&row);
 
                     let row_rect = egui::Rect::from_min_size(
-                        egui::pos2(origin.x, origin.y + row as f32 * ROW_H),
+                        egui::pos2(origin.x, origin.y + (row - vis.start) as f32 * ROW_H),
                         egui::vec2(avail_w, ROW_H),
                     );
 
