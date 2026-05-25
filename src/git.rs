@@ -96,34 +96,27 @@ impl GitRepo {
     fn build_ref_map(&self) -> HashMap<String, Vec<RefLabel>> {
         let mut map: HashMap<String, Vec<RefLabel>> = HashMap::new();
 
-        let head_oid = self.repo.head().ok()
-            .and_then(|h| h.resolve().ok())
-            .and_then(|h| h.target())
-            .map(|o| o.to_string());
-
         if let Ok(refs) = self.repo.references() {
             for r in refs.flatten() {
-                let full = r.name().unwrap_or("").to_string();
+                let full  = r.name().unwrap_or("").to_string();
                 let short = r.shorthand().unwrap_or("?").to_string();
-                let target = r.resolve().ok()
-                    .and_then(|r| r.target())
-                    .map(|o| o.to_string());
 
                 let kind = if full.starts_with("refs/tags/") {
                     RefKind::Tag
                 } else if full.starts_with("refs/remotes/") {
                     RefKind::Remote
-                } else if head_oid.as_deref() == target.as_deref()
-                    && self.repo.head().ok()
-                        .and_then(|h| h.shorthand().map(|s| s.to_string()))
-                        .as_deref() == Some(&short)
-                {
-                    RefKind::Head
                 } else {
-                    RefKind::Branch
+                    let is_head = self.repo.head().ok()
+                        .and_then(|h| h.shorthand().map(|s| s.to_string()))
+                        .as_deref() == Some(&short);
+                    if is_head { RefKind::Head } else { RefKind::Branch }
                 };
 
-                if let Some(oid) = target {
+                // peel_to_commit() handles both lightweight tags (direct commit
+                // pointer) and annotated tags (tag object → commit), so the OID
+                // always matches what load_commits stores in `id`.
+                if let Ok(commit) = r.peel_to_commit() {
+                    let oid = commit.id().to_string();
                     map.entry(oid).or_default().push(RefLabel { name: short, kind });
                 }
             }
