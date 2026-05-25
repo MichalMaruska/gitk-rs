@@ -665,7 +665,7 @@ impl GitkApp {
         let mut flash               = false;
         let mut find_author         = false;
 
-        egui::Area::new("ctx_menu".into())
+        egui::Area::new(egui::Id::new("ctx_menu"))
             .fixed_pos(menu_pos)
             .order(egui::Order::Tooltip)
             .show(ctx, |ui| {
