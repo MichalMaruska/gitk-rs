@@ -545,8 +545,11 @@ impl GitkApp {
                 let r1 = (vis_end + 1).min(n);
                 for row in r0..r1 {
                     let node = &graph_nodes[row];
-                    let yc   = origin.y + (row - vis_start) as f32 * ROW_H + ROW_H * 0.5;
-                    let yn   = origin.y + (row - vis_start) as f32 * ROW_H + ROW_H * 1.5;
+                    // Use signed offset so rows above vis_start (r0 = vis_start-1)
+                    // produce a negative y and draw just off the top — no underflow.
+                    let row_off = (row as i32 - vis_start as i32) as f32;
+                    let yc   = origin.y + row_off * ROW_H + ROW_H * 0.5;
+                    let yn   = origin.y + row_off * ROW_H + ROW_H * 1.5;
 
                     for edge in &node.edges {
                         // Both ends beyond cap → skip entirely
