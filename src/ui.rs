@@ -536,13 +536,17 @@ impl GitkApp {
                 // Origin is the top-left of the first visible row.
                 let origin = egui::pos2(full_rect.left(), full_rect.top());
 
+                // Extract start/end before vis is moved into any loop.
+                let vis_start = vis.start;
+                let vis_end   = vis.end;
+
                 // ── Draw edges ────────────────────────────────────────────
-                let r0 = vis.start.saturating_sub(1);
-                let r1 = (vis.end + 1).min(n);
+                let r0 = vis_start.saturating_sub(1);
+                let r1 = (vis_end + 1).min(n);
                 for row in r0..r1 {
                     let node = &graph_nodes[row];
-                    let yc   = origin.y + (row - vis.start) as f32 * ROW_H + ROW_H * 0.5;
-                    let yn   = origin.y + (row - vis.start) as f32 * ROW_H + ROW_H * 1.5;
+                    let yc   = origin.y + (row - vis_start) as f32 * ROW_H + ROW_H * 0.5;
+                    let yn   = origin.y + (row - vis_start) as f32 * ROW_H + ROW_H * 1.5;
 
                     for edge in &node.edges {
                         // Both ends beyond cap → skip entirely
@@ -563,14 +567,14 @@ impl GitkApp {
                 }
 
                 // ── Draw rows ─────────────────────────────────────────────
-                for row in vis {
+                for row in vis_start..vis_end {
                     let node   = &graph_nodes[row];
                     let (summary, author, date_str, refs) = &commit_rows[node.commit_idx];
                     let is_sel = selected_idx == Some(row);
                     let is_hit = search_matches.contains(&row);
 
                     let row_rect = egui::Rect::from_min_size(
-                        egui::pos2(origin.x, origin.y + (row - vis.start) as f32 * ROW_H),
+                        egui::pos2(origin.x, origin.y + (row - vis_start) as f32 * ROW_H),
                         egui::vec2(avail_w, ROW_H),
                     );
 
