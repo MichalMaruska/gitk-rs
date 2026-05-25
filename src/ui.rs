@@ -576,7 +576,7 @@ impl GitkApp {
                         let bw = g.size().x + 6.0;
                         let br = egui::Rect::from_min_size(egui::pos2(bx + 1.0, ty - 1.0), egui::vec2(bw, ROW_H - 4.0));
                         painter.rect_filled(br, 2.5, bg_col);
-                        painter.rect_stroke(br, 2.5, Stroke::new(0.5_f32, fg_col.linear_multiply(0.5)));
+                        painter.rect_stroke(br, 2.5_f32, Stroke::new(0.5_f32, fg_col.linear_multiply(0.5_f32)));
                         painter.galley(egui::pos2(bx + 4.0, ty + 1.0), g, fg_col);
                         bx += bw + 3.0;
                     }
